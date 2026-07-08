@@ -149,6 +149,16 @@ if (typeof THREE === 'undefined') {
 }
 
 (function(){
+  const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  const hintEl = document.getElementById('hint');
+  if (hintEl) {
+    hintEl.textContent = isTouchDevice
+      ? 'Drag to rotate · Pinch to zoom · Tap a node to highlight its connections'
+      : 'Drag to rotate · Scroll to zoom · Click a node to highlight its connections';
+  }
+})();
+
+(function(){
   if (typeof THREE === 'undefined') return;
   try {
 
