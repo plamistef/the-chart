@@ -31,10 +31,6 @@
   button.secondary:hover { background:#2f3547; }
   button:disabled { opacity:0.5; cursor:default; }
   #stats { font-size:11px; color:#8b90a3; }
-  #syncState { font-size:11px; display:flex; align-items:center; gap:6px; }
-  #syncDot { width:7px; height:7px; border-radius:50%; background:#54d6a0; flex:none; }
-  #syncDot.bad { background:#ff5c5c; }
-  #syncDot.busy { background:#ffc65b; }
   .conn {
     display:flex; align-items:center; justify-content:space-between; gap:6px;
     background:#151926; border:1px solid #232a3d; border-radius:6px; padding:5px 8px; font-size:12px;
@@ -100,7 +96,6 @@
   <hr>
   <div id="panelScroll" style="flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:8px;">
     <div id="stats">0 people · 0 connections</div>
-    <div id="syncState"><span id="syncDot"></span><span id="syncText">Synced — shared with anyone on this link</span></div>
     <div>
       <button class="toggle-header" id="peopleToggle" type="button">
         <span>People</span><span class="caret" id="peopleCaret">&#9656;</span>
@@ -137,9 +132,7 @@ if (typeof THREE === 'undefined') {
   // ---------- shared backend storage ----------
   const API = '/api/connections';
   function setSync(state, text){
-    const dot = document.getElementById('syncDot');
-    dot.className = state === 'bad' ? 'bad' : (state === 'busy' ? 'busy' : '');
-    document.getElementById('syncText').textContent = text;
+    if (state === 'bad') showError(text);
   }
   async function fetchEdges(){
     const res = await fetch(API, { cache:'no-store' });
