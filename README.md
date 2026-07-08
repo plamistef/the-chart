@@ -9,10 +9,31 @@ A 3D "who's connected to who" web, with data shared across everyone who opens th
 3. Redeploy (Vercel usually triggers this for you after adding storage; if not, trigger a redeploy from the Deployments tab).
 4. Open the deployed URL — everyone who visits it reads and writes the same connection list.
 
+## Access / passwords
+
+The site is locked behind a single password field on load:
+
+- Entering the **regular password** unlocks view-only access — the chart is visible, but the whole control panel (add/edit, export/import, clear, people/connections lists) is hidden.
+- Entering the **admin password** in that same field unlocks the full panel with editing.
+
+This is enforced both in the UI and on the server (`api/connections.js` rejects reads without a valid password and rejects writes without the admin one), so it's not just a UI hide.
+
+Defaults (used if you don't set anything): regular password is `password`, admin password is `adminpassword`.
+
+**To change the passwords:**
+
+1. In the Vercel dashboard, open this project → **Settings** → **Environment Variables**.
+2. Add a variable: Key = `APP_PASSWORD`, Value = whatever you want the regular password to be. Leave environments as Production + Preview (+ Development if you want) checked, then Save.
+3. Add another: Key = `APP_ADMIN_PASSWORD`, Value = your new admin password. Save.
+4. Go to **Deployments** → latest deployment → **⋯** → **Redeploy** (environment variable changes don't apply automatically — they only take effect on the next deployment).
+
+Once redeployed, the old defaults stop working and only your new values do.
+
 ## Structure
 
-- `index.html` — the 3D visualization and control panel (Three.js).
-- `api/connections.js` — serverless function (GET/POST) that reads and writes the shared connection list in Redis.
+- `index.html` — the 3D visualization, control panel, and password gate (Three.js).
+- `api/connections.js` — serverless function (GET/POST) that reads and writes the shared connection list in Redis; requires the password header on every request.
+- `api/auth.js` — serverless function that checks a submitted password and reports whether it grants `user` or `admin` access.
 
 ## Local development
 
