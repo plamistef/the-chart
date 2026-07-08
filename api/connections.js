@@ -10,6 +10,9 @@ const REDIS_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_
 const REDIS_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
 const KEY = 'connections';
 
+const REGULAR_PASSWORD = process.env.APP_PASSWORD || 'password';
+const ADMIN_PASSWORD = process.env.APP_ADMIN_PASSWORD || 'adminpassword';
+
 async function redisCommand(command) {
   const res = await fetch(REDIS_URL, {
     method: 'POST',
@@ -29,7 +32,7 @@ async function redisCommand(command) {
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-app-password');
 
   if (req.method === 'OPTIONS') {
     res.status(204).end();
@@ -43,8 +46,16 @@ module.exports = async (req, res) => {
     return;
   }
 
+  const pw = req.headers['x-app-password'];
+  const isAdmin = !!pw && pw === ADMIN_PASSWORD;
+  const isViewer = isAdmin || (!!pw && pw === REGULAR_PASSWORD);
+
   try {
     if (req.method === 'GET') {
+      if (!isViewer) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
       const { result } = await redisCommand(['GET', KEY]);
       const edges = result ? JSON.parse(result) : [];
       res.status(200).json({ edges });
@@ -52,6 +63,10 @@ module.exports = async (req, res) => {
     }
 
     if (req.method === 'POST') {
+      if (!isAdmin) {
+        res.status(403).json({ error: 'Admin password required to edit.' });
+        return;
+      }
       let body = req.body;
       if (typeof body === 'string') {
         try { body = JSON.parse(body); } catch (e) { body = null; }

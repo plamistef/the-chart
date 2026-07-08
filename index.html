@@ -64,13 +64,40 @@
     position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
     color:#8b90a3; font-size:13px; z-index:50;
   }
+  #authOverlay {
+    position:fixed; inset:0; z-index:200; display:flex; align-items:center; justify-content:center;
+    background:rgba(10,12,20,0.55); backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px);
+  }
+  #authCard {
+    width:280px; background:rgba(21,25,38,0.97); border:1px solid rgba(255,255,255,0.1);
+    border-radius:14px; padding:22px; color:#e6e8ef; box-shadow:0 20px 60px rgba(0,0,0,0.6);
+    display:flex; flex-direction:column; gap:12px; text-align:center;
+  }
+  #authCard h2 { font-size:15px; margin:0; font-weight:600; }
+  #authCard input[type=password] {
+    width:100%; box-sizing:border-box; background:#1a1e2c; border:1px solid #2c3145; color:#e6e8ef;
+    border-radius:7px; padding:10px 12px; font-size:14px; outline:none; text-align:center;
+  }
+  #authCard input[type=password]:focus { border-color:#5b7fff; }
+  #authError { color:#ff6b6b; font-size:12px; min-height:14px; margin:0; }
+  #adminBtn { background:transparent; color:#8b90a3; border:1px solid #2c3145; font-size:11px; padding:6px 10px; }
+  #adminBtn:hover { background:#1e2333; color:#c7cbdb; }
 </style>
 </head>
 <body>
 
+<div id="authOverlay">
+  <div id="authCard">
+    <h2>Enter password to view the chart</h2>
+    <input type="password" id="authPassword" placeholder="Password" autocomplete="off">
+    <p id="authError"></p>
+    <button id="unlockBtn">Unlock</button>
+    <button id="adminBtn">Log in as admin</button>
+  </div>
+</div>
 <div id="error-banner"></div>
 <div id="canvas-wrap"></div>
-<div id="loading">Loading connections…</div>
+<div id="loading" style="display:none;">Loading connections…</div>
 <div id="tooltip"></div>
 <div id="hint">Drag to rotate · Scroll to zoom · Click a node to highlight its connections</div>
 
@@ -129,13 +156,68 @@ if (typeof THREE === 'undefined') {
   if (typeof THREE === 'undefined') return;
   try {
 
+  // ---------- access gate ----------
+  let authToken = sessionStorage.getItem('chartAuthToken') || null;
+  let role = sessionStorage.getItem('chartAuthRole') || null;
+  const overlay = document.getElementById('authOverlay');
+  const authInput = document.getElementById('authPassword');
+  const authErrorEl = document.getElementById('authError');
+
+  function applyRole(){
+    document.getElementById('panel').style.display = (role === 'user') ? 'none' : '';
+  }
+
+  function grantAccess(newToken, newRole){
+    authToken = newToken;
+    role = newRole;
+    sessionStorage.setItem('chartAuthToken', authToken);
+    sessionStorage.setItem('chartAuthRole', role);
+    overlay.style.display = 'none';
+    applyRole();
+    initialLoad();
+  }
+
+  function revokeAccess(message){
+    sessionStorage.removeItem('chartAuthToken');
+    sessionStorage.removeItem('chartAuthRole');
+    authToken = null; role = null;
+    document.getElementById('loading').style.display = 'none';
+    overlay.style.display = 'flex';
+    authErrorEl.textContent = message || '';
+  }
+
+  async function attemptLogin(password){
+    authErrorEl.textContent = '';
+    if (!password) { authErrorEl.textContent = 'Enter a password.'; return; }
+    try {
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password })
+      });
+      const data = await res.json().catch(()=>({}));
+      if (!res.ok) {
+        authErrorEl.textContent = data.error || 'Incorrect password';
+        return;
+      }
+      grantAccess(password, data.role);
+    } catch(err){
+      authErrorEl.textContent = 'Could not reach server: ' + err.message;
+    }
+  }
+
+  document.getElementById('unlockBtn').addEventListener('click', ()=> attemptLogin(authInput.value));
+  document.getElementById('adminBtn').addEventListener('click', ()=> attemptLogin(authInput.value));
+  authInput.addEventListener('keydown', e=>{ if (e.key==='Enter') attemptLogin(authInput.value); });
+
   // ---------- shared backend storage ----------
   const API = '/api/connections';
   function setSync(state, text){
     if (state === 'bad') showError(text);
   }
   async function fetchEdges(){
-    const res = await fetch(API, { cache:'no-store' });
+    const res = await fetch(API, { cache:'no-store', headers: { 'x-app-password': authToken || '' } });
+    if (res.status === 401) { const e = new Error('Unauthorized'); e.unauthorized = true; throw e; }
     if (!res.ok) throw new Error('Server returned ' + res.status);
     const data = await res.json();
     return Array.isArray(data.edges) ? data.edges : [];
@@ -144,7 +226,7 @@ if (typeof THREE === 'undefined') {
     setSync('busy', 'Saving…');
     const res = await fetch(API, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-app-password': authToken || '' },
       body: JSON.stringify({ edges: newEdges })
     });
     if (!res.ok) {
@@ -620,9 +702,14 @@ if (typeof THREE === 'undefined') {
 
   // ---------- initial load + light polling so everyone stays in sync ----------
   async function initialLoad(){
+    document.getElementById('loading').style.display = 'flex';
     try {
       edges = await fetchEdges();
     } catch (err) {
+      if (err.unauthorized) {
+        revokeAccess('Session expired — please log in again.');
+        return;
+      }
       showError('Could not load shared data: ' + err.message + '. Showing an empty board — changes may not save until this is fixed.');
       edges = [];
     }
@@ -632,7 +719,7 @@ if (typeof THREE === 'undefined') {
 
   let polling = false;
   setInterval(async ()=>{
-    if (polling || document.hidden) return;
+    if (!authToken || polling || document.hidden) return;
     polling = true;
     try {
       const fresh = await fetchEdges();
@@ -640,11 +727,21 @@ if (typeof THREE === 'undefined') {
         edges = fresh;
         rebuildGraph();
       }
-    } catch(e) { /* stay quiet on background poll failures */ }
+    } catch(e) {
+      if (e.unauthorized) revokeAccess('Session expired — please log in again.');
+      /* otherwise stay quiet on background poll failures */
+    }
     polling = false;
   }, 20000);
 
-  initialLoad();
+  if (authToken && role) {
+    overlay.style.display = 'none';
+    applyRole();
+    initialLoad();
+  } else {
+    overlay.style.display = 'flex';
+    authInput.focus();
+  }
 
   } catch(err) {
     showError('Init error: ' + err.message);
