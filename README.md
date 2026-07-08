@@ -29,6 +29,24 @@ Defaults (used if you don't set anything): regular password is `password`, admin
 
 Once redeployed, the old defaults stop working and only your new values do.
 
+## Import / Export
+
+The admin panel's **Export** button downloads the current connection list as `connections.json`. **Import** loads a JSON file back in, adding to whatever's already there (use **Clear all** first for a clean slate).
+
+The expected format is a JSON array of two-item arrays — each pair is one connection:
+
+```json
+[
+  ["Christina", "Engel"],
+  ["Engel", "Marcus"],
+  ["Christina", "Priya"],
+  ["Priya", "Shane"],
+  ["Shane", "Carmen"]
+]
+```
+
+Notes on parsing: extra items beyond the first two in a pair are ignored, and duplicate or reversed-duplicate pairs (e.g. `["A","B"]` and `["B","A"]`) are automatically skipped. The easiest way to get a valid starting file is to click Export first and edit that.
+
 ## Structure
 
 - `index.html` — the 3D visualization, control panel, and password gate (Three.js).
