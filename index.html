@@ -80,8 +80,6 @@
   }
   #authCard input[type=password]:focus { border-color:#5b7fff; }
   #authError { color:#ff6b6b; font-size:12px; min-height:14px; margin:0; }
-  #adminBtn { background:transparent; color:#8b90a3; border:1px solid #2c3145; font-size:11px; padding:6px 10px; }
-  #adminBtn:hover { background:#1e2333; color:#c7cbdb; }
 </style>
 </head>
 <body>
@@ -91,7 +89,6 @@
     <input type="password" id="authPassword" placeholder="enter the password to unlock the chart" autocomplete="off">
     <p id="authError"></p>
     <button id="unlockBtn">Unlock</button>
-    <button id="adminBtn">admin login</button>
   </div>
 </div>
 <div id="error-banner"></div>
@@ -185,14 +182,14 @@ if (typeof THREE === 'undefined') {
     authErrorEl.textContent = message || '';
   }
 
-  async function attemptLogin(password, mode){
+  async function attemptLogin(password){
     authErrorEl.textContent = '';
     if (!password) { authErrorEl.textContent = 'Enter a password.'; return; }
     try {
       const res = await fetch('/api/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, mode })
+        body: JSON.stringify({ password })
       });
       const data = await res.json().catch(()=>({}));
       if (!res.ok) {
@@ -205,9 +202,8 @@ if (typeof THREE === 'undefined') {
     }
   }
 
-  document.getElementById('unlockBtn').addEventListener('click', ()=> attemptLogin(authInput.value, 'user'));
-  document.getElementById('adminBtn').addEventListener('click', ()=> attemptLogin(authInput.value, 'admin'));
-  authInput.addEventListener('keydown', e=>{ if (e.key==='Enter') attemptLogin(authInput.value, 'user'); });
+  document.getElementById('unlockBtn').addEventListener('click', ()=> attemptLogin(authInput.value));
+  authInput.addEventListener('keydown', e=>{ if (e.key==='Enter') attemptLogin(authInput.value); });
 
   // ---------- shared backend storage ----------
   const API = '/api/connections';
