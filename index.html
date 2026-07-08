@@ -6,7 +6,8 @@
 <title>the chart</title>
 <style>
   html, body { margin:0; padding:0; overflow:hidden; height:100%; background:#171d33; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
-  #canvas-wrap { position:fixed; inset:0; }
+  #canvas-wrap { position:fixed; inset:0; touch-action:none; }
+  #canvas-wrap canvas { touch-action:none; }
   #panel {
     position:fixed; top:16px; left:16px; width:300px; max-height:calc(100vh - 32px);
     background:rgba(15,18,28,0.88); border:1px solid rgba(255,255,255,0.08);
@@ -292,6 +293,36 @@ if (typeof THREE === 'undefined') {
     radius = Math.max(40, Math.min(560, radius));
     updateCamera();
   }, { passive:false });
+
+  // touch pinch-to-zoom (mobile) — wheel events don't fire for touch gestures
+  renderer.domElement.style.touchAction = 'none';
+  let pinchStartDist = null;
+  let pinchStartRadius = radius;
+  function touchDist(t0, t1){
+    const dx = t0.clientX - t1.clientX, dy = t0.clientY - t1.clientY;
+    return Math.sqrt(dx*dx + dy*dy);
+  }
+  renderer.domElement.addEventListener('touchstart', e=>{
+    if (e.touches.length === 2){
+      autoFit = false;
+      focusing = false;
+      dragging = false;
+      pinchStartDist = touchDist(e.touches[0], e.touches[1]);
+      pinchStartRadius = radius;
+    }
+  }, { passive:true });
+  renderer.domElement.addEventListener('touchmove', e=>{
+    if (e.touches.length === 2 && pinchStartDist){
+      e.preventDefault();
+      const newDist = touchDist(e.touches[0], e.touches[1]);
+      radius = pinchStartRadius * (pinchStartDist / newDist);
+      radius = Math.max(40, Math.min(560, radius));
+      updateCamera();
+    }
+  }, { passive:false });
+  renderer.domElement.addEventListener('touchend', e=>{
+    if (e.touches.length < 2) pinchStartDist = null;
+  });
 
   window.addEventListener('resize', ()=>{
     camera.aspect = window.innerWidth/window.innerHeight;
