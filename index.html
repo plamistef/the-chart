@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3D Connection Web</title>
+<style>
+  html, body { margin:0; padding:0; overflow:hidden; height:100%; background:#171d33; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
+  #canvas-wrap { position:fixed; inset:0; }
+  #panel {
+    position:fixed; top:16px; left:16px; width:300px; max-height:calc(100vh - 32px);
+    background:rgba(15,18,28,0.88); border:1px solid rgba(255,255,255,0.08);
+    border-radius:12px; padding:16px; color:#e6e8ef; backdrop-filter:blur(8px);
+    box-shadow:0 8px 30px rgba(0,0,0,0.4); display:flex; flex-direction:column; gap:10px;
+    z-index:10; overflow:hidden;
+  }
+  #panel h1 { font-size:15px; margin:0 0 2px; font-weight:600; letter-spacing:.2px; }
+  #panel .sub { font-size:11px; color:#8b90a3; margin:0 0 6px; }
+  .row { display:flex; gap:6px; flex-wrap:wrap; }
+  input[type=text] {
+    flex:1; min-width:0; background:#1a1e2c; border:1px solid #2c3145; color:#e6e8ef;
+    border-radius:7px; padding:8px 10px; font-size:13px; outline:none;
+  }
+  input[type=text]:focus { border-color:#5b7fff; }
+  button {
+    background:#5b7fff; color:#fff; border:none; border-radius:7px; padding:8px 12px;
+    font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap;
+  }
+  button:hover { background:#4468f0; }
+  button.secondary { background:#242938; color:#c7cbdb; }
+  button.secondary:hover { background:#2f3547; }
+  button:disabled { opacity:0.5; cursor:default; }
+  #stats { font-size:11px; color:#8b90a3; }
+  #syncState { font-size:11px; display:flex; align-items:center; gap:6px; }
+  #syncDot { width:7px; height:7px; border-radius:50%; background:#54d6a0; flex:none; }
+  #syncDot.bad { background:#ff5c5c; }
+  #syncDot.busy { background:#ffc65b; }
+  .conn {
+    display:flex; align-items:center; justify-content:space-between; gap:6px;
+    background:#151926; border:1px solid #232a3d; border-radius:6px; padding:5px 8px; font-size:12px;
+  }
+  .conn span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .conn button { background:transparent; color:#8b90a3; padding:0 4px; font-size:14px; font-weight:700; }
+  .conn button:hover { color:#ff6b6b; }
+  hr { border:none; border-top:1px solid rgba(255,255,255,0.08); margin:2px 0; }
+  .toggle-header {
+    width:100%; display:flex; align-items:center; justify-content:space-between;
+    background:#181c2a; color:#e6e8ef; border:1px solid #262b3d; text-align:left;
+    font-size:12px; font-weight:600; padding:8px 10px; border-radius:7px;
+  }
+  .toggle-header:hover { background:#1e2333; }
+  .toggle-header .caret { font-size:10px; color:#8b90a3; transition:transform 0.15s ease; }
+  .toggle-header.open .caret { transform:rotate(90deg); }
+  .collapsible { display:none; flex-direction:column; gap:4px; margin-top:6px; }
+  .collapsible.open { display:flex; }
+  #tooltip {
+    position:fixed; pointer-events:none; background:rgba(15,18,28,0.95); color:#fff;
+    padding:6px 10px; border-radius:6px; font-size:12px; border:1px solid rgba(255,255,255,0.12);
+    display:none; z-index:20;
+  }
+  #hint { position:fixed; bottom:14px; left:50%; transform:translateX(-50%); color:#5c6178; font-size:11px; z-index:5; }
+  #error-banner {
+    display:none; position:fixed; top:16px; left:50%; transform:translateX(-50%);
+    max-width:640px; background:#3a1420; border:1px solid #ff6b6b; color:#ffd6d6;
+    padding:10px 16px; border-radius:8px; font-size:13px; z-index:100; box-shadow:0 8px 30px rgba(0,0,0,0.5);
+  }
+  #loading {
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    color:#8b90a3; font-size:13px; z-index:50;
+  }
+</style>
+</head>
+<body>
+
+<div id="error-banner"></div>
+<div id="canvas-wrap"></div>
+<div id="loading">Loading connections…</div>
+<div id="tooltip"></div>
+<div id="hint">Drag to rotate · Scroll to zoom · Click a node to highlight its connections</div>
+
+<div id="panel">
+  <h1>3D Connection Web</h1>
+  <p class="sub">Add who's connected to who, e.g. Christina — Engel</p>
+
+  <div class="row">
+    <input type="text" id="nameA" placeholder="Person A">
+    <input type="text" id="nameB" placeholder="Person B">
+  </div>
+  <button id="addBtn">Add connection</button>
+
+  <hr>
+  <div class="row">
+    <button id="fitBtn" class="secondary">Fit view</button>
+    <button id="exportBtn" class="secondary">Export</button>
+    <button id="importBtn" class="secondary">Import</button>
+    <button id="clearBtn" class="secondary">Clear all</button>
+  </div>
+  <input type="file" id="importFile" accept="application/json" style="display:none;">
+
+  <hr>
+  <div id="panelScroll" style="flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:8px;">
+    <div id="stats">0 people · 0 connections</div>
+    <div id="syncState"><span id="syncDot"></span><span id="syncText">Synced — shared with anyone on this link</span></div>
+    <div>
+      <button class="toggle-header" id="peopleToggle" type="button">
+        <span>People</span><span class="caret" id="peopleCaret">&#9656;</span>
+      </button>
+      <div id="people" class="collapsible"></div>
+    </div>
+    <div>
+      <button class="toggle-header" id="connToggle" type="button">
+        <span>Connections</span><span class="caret" id="connCaret">&#9656;</span>
+      </button>
+      <div id="list" class="collapsible"></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+function showError(msg){
+  const el = document.getElementById('error-banner');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+window.addEventListener('error', function(e){
+  showError('Something went wrong: ' + (e.message || 'unknown error') + '. Try reloading.');
+});
+if (typeof THREE === 'undefined') {
+  showError('3D library failed to load. Check your connection and reload.');
+}
+
+(function(){
+  if (typeof THREE === 'undefined') return;
+  try {
+
+  // ---------- shared backend storage ----------
+  const API = '/api/connections';
+  function setSync(state, text){
+    const dot = document.getElementById('syncDot');
+    dot.className = state === 'bad' ? 'bad' : (state === 'busy' ? 'busy' : '');
+    document.getElementById('syncText').textContent = text;
+  }
+  async function fetchEdges(){
+    const res = await fetch(API, { cache:'no-store' });
+    if (!res.ok) throw new Error('Server returned ' + res.status);
+    const data = await res.json();
+    return Array.isArray(data.edges) ? data.edges : [];
+  }
+  async function pushEdges(newEdges){
+    setSync('busy', 'Saving…');
+    const res = await fetch(API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ edges: newEdges })
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(()=>({}));
+      throw new Error(body.error || ('Server returned ' + res.status));
+    }
+    setSync('ok', 'Synced — shared with anyone on this link');
+  }
+
+  let edges = []; // array of [a,b], populated after initial fetch
+
+  function saveEdges(){
+    pushEdges(edges).catch(err=>{
+      setSync('bad', 'Could not save: ' + err.message);
+    });
+  }
+
+  // ---------- three.js setup ----------
+  const wrap = document.getElementById('canvas-wrap');
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x171d33, 0.0015);
+  const camera = new THREE.PerspectiveCamera(55, window.innerWidth/window.innerHeight, 0.1, 2000);
+  const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
+  renderer.setClearColor(0x171d33, 1);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  wrap.appendChild(renderer.domElement);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 1.15));
+  const dl = new THREE.DirectionalLight(0xffffff, 0.9);
+  dl.position.set(50,80,50);
+  scene.add(dl);
+  const dl2 = new THREE.DirectionalLight(0xffffff, 0.5);
+  dl2.position.set(-60,-40,-30);
+  scene.add(dl2);
+
+  // simple orbit camera (manual, no extra dependency)
+  let radius = 260, theta = Math.PI/3.2, phi = Math.PI/2.4;
+  let autoFit = true;
+  let target = new THREE.Vector3(0,0,0);
+  let targetGoal = new THREE.Vector3(0,0,0);
+  let focusing = false;
+  let radiusGoal = radius;
+  function updateCamera(){
+    camera.position.x = target.x + radius * Math.sin(phi) * Math.cos(theta);
+    camera.position.y = target.y + radius * Math.cos(phi);
+    camera.position.z = target.z + radius * Math.sin(phi) * Math.sin(theta);
+    camera.lookAt(target);
+  }
+  updateCamera();
+
+  let dragging = false, lastX=0, lastY=0;
+  renderer.domElement.addEventListener('pointerdown', e=>{ dragging=true; autoFit=false; focusing=false; lastX=e.clientX; lastY=e.clientY; });
+  window.addEventListener('pointerup', ()=> dragging=false);
+  window.addEventListener('pointermove', e=>{
+    if(!dragging) return;
+    const dx = e.clientX-lastX, dy = e.clientY-lastY;
+    lastX=e.clientX; lastY=e.clientY;
+    theta -= dx*0.005;
+    phi -= dy*0.005;
+    phi = Math.max(0.15, Math.min(Math.PI-0.15, phi));
+    updateCamera();
+  });
+  renderer.domElement.addEventListener('wheel', e=>{
+    e.preventDefault();
+    autoFit = false;
+    focusing = false;
+    radius *= (1 + e.deltaY*0.001);
+    radius = Math.max(40, Math.min(560, radius));
+    updateCamera();
+  }, { passive:false });
+
+  window.addEventListener('resize', ()=>{
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // ---------- label sprites ----------
+  function makeLabel(text){
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const fontSize = 46;
+    ctx.font = `600 ${fontSize}px -apple-system, sans-serif`;
+    const w = Math.max(120, ctx.measureText(text).width + 40);
+    canvas.width = w; canvas.height = 80;
+    ctx.font = `600 ${fontSize}px -apple-system, sans-serif`;
+    ctx.fillStyle = 'rgba(10,12,20,0.0)';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle = '#eef0f8';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 8, canvas.height/2 + 4);
+    const tex = new THREE.CanvasTexture(canvas);
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent:true, depthWrite:false });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(w*0.16, 80*0.16, 1);
+    return sprite;
+  }
+
+  // ---------- graph model ----------
+  const palette = [0x6f9bff,0xff5c8a,0x2be3a8,0xffd23f,0xc86bff,0x2fe0ff,0xff9433,0xb6ff3d];
+  let nodes = {};
+  let group = new THREE.Group();
+  scene.add(group);
+  let raycaster = new THREE.Raycaster();
+  let mouse = new THREE.Vector2();
+  let selected = null;
+
+  function colorFor(i){ return palette[i % palette.length]; }
+
+  function rebuildGraph(){
+    group.clear();
+    nodes = {};
+    const names = [];
+    edges.forEach(([a,b])=>{ if(!names.includes(a)) names.push(a); if(!names.includes(b)) names.push(b); });
+
+    names.forEach((name, i)=>{
+      const degree = edges.filter(e=>e[0]===name||e[1]===name).length;
+      const size = 5 + Math.min(degree, 8)*1.15;
+      const geo = new THREE.SphereGeometry(size, 28, 28);
+      const mat = new THREE.MeshStandardMaterial({ color: colorFor(i), emissive: colorFor(i), emissiveIntensity: 0.65, roughness:0.3, metalness:0.05 });
+      const mesh = new THREE.Mesh(geo, mat);
+      const ang = (i / Math.max(names.length,1)) * Math.PI * 2;
+      const rad = 60 + (names.length>1 ? Math.random()*40 : 0);
+      const pos = new THREE.Vector3(
+        Math.cos(ang)*rad + (Math.random()-0.5)*20,
+        (Math.random()-0.5)*80,
+        Math.sin(ang)*rad + (Math.random()-0.5)*20
+      );
+      mesh.position.copy(pos);
+      mesh.userData.name = name;
+      group.add(mesh);
+
+      const label = makeLabel(name);
+      label.position.copy(pos).add(new THREE.Vector3(0, size+6, 0));
+      group.add(label);
+
+      nodes[name] = { pos, vel:new THREE.Vector3(), mesh, label, degree, size, scaleCur:1, desiredScale:1 };
+    });
+
+    const lineMat = new THREE.LineBasicMaterial({ color:0x9fb0e8, transparent:true, opacity:0.8 });
+    edges.forEach(([a,b])=>{
+      const geo = new THREE.BufferGeometry().setFromPoints([nodes[a].pos.clone(), nodes[b].pos.clone()]);
+      const line = new THREE.Line(geo, lineMat.clone());
+      line.userData.a = a; line.userData.b = b;
+      group.add(line);
+    });
+
+    updateStats();
+    renderPeopleList();
+    renderList();
+    applyHighlight();
+  }
+
+  function lines(){ return group.children.filter(c=>c.type==='Line'); }
+
+  // ---------- force-directed simulation ----------
+  function step(){
+    const names = Object.keys(nodes);
+    const REPEL = 900, SPRING = 0.02, REST = 55, DAMP = 0.85, CENTER = 0.003;
+    names.forEach(n=>{
+      const node = nodes[n];
+      const force = new THREE.Vector3();
+      names.forEach(m=>{
+        if (m===n) return;
+        const other = nodes[m];
+        const diff = new THREE.Vector3().subVectors(node.pos, other.pos);
+        let d = diff.length(); if (d<1) d=1;
+        diff.normalize().multiplyScalar(REPEL/(d*d));
+        force.add(diff);
+      });
+      force.add(new THREE.Vector3().subVectors(new THREE.Vector3(0,0,0), node.pos).multiplyScalar(CENTER));
+      node.vel.add(force.multiplyScalar(0.02));
+    });
+    edges.forEach(([a,b])=>{
+      const na=nodes[a], nb=nodes[b];
+      if(!na||!nb) return;
+      const diff = new THREE.Vector3().subVectors(nb.pos, na.pos);
+      const d = diff.length()||1;
+      const stretch = (d-REST)*SPRING;
+      diff.normalize().multiplyScalar(stretch);
+      na.vel.add(diff);
+      nb.vel.sub(diff);
+    });
+    names.forEach(n=>{
+      const node = nodes[n];
+      node.vel.multiplyScalar(DAMP);
+      node.pos.add(node.vel);
+      node.mesh.position.copy(node.pos);
+      node.label.position.copy(node.pos).add(new THREE.Vector3(0, node.size+6, 0));
+      node.scaleCur += (node.desiredScale - node.scaleCur) * 0.15;
+      node.mesh.scale.setScalar(node.scaleCur);
+    });
+    lines().forEach(line=>{
+      const a = nodes[line.userData.a], b = nodes[line.userData.b];
+      if(!a||!b) return;
+      const pts = [a.pos.clone(), b.pos.clone()];
+      line.geometry.setFromPoints(pts);
+    });
+    if (autoFit && names.length){
+      let maxDist = 0;
+      names.forEach(n=>{ const d = nodes[n].pos.length(); if (d>maxDist) maxDist = d; });
+      const desired = Math.max(70, maxDist*2.3 + 35);
+      radius += (desired-radius)*0.06;
+      updateCamera();
+    }
+  }
+
+  // ---------- interaction: click to highlight + focus ----------
+  const tooltip = document.getElementById('tooltip');
+  renderer.domElement.addEventListener('click', e=>{
+    mouse.x = (e.clientX/window.innerWidth)*2-1;
+    mouse.y = -(e.clientY/window.innerHeight)*2+1;
+    raycaster.setFromCamera(mouse, camera);
+    const meshes = Object.values(nodes).map(n=>n.mesh);
+    const hits = raycaster.intersectObjects(meshes);
+    if (hits.length){
+      selected = hits[0].object.userData.name;
+    } else {
+      selected = null;
+    }
+    if (selected){
+      const clusterPos = [nodes[selected].pos.clone()];
+      edges.forEach(([a,b])=>{
+        if (a===selected) clusterPos.push(nodes[b].pos.clone());
+        if (b===selected) clusterPos.push(nodes[a].pos.clone());
+      });
+      const centroid = clusterPos.reduce((acc,p)=>acc.add(p), new THREE.Vector3()).multiplyScalar(1/clusterPos.length);
+      let maxDist = 0;
+      clusterPos.forEach(p=>{ const d = p.distanceTo(centroid); if (d>maxDist) maxDist = d; });
+      targetGoal.copy(centroid);
+      radiusGoal = Math.max(90, maxDist*2.6 + 55);
+      autoFit = false;
+      focusing = true;
+    } else {
+      targetGoal.set(0,0,0);
+      autoFit = true;
+    }
+    applyHighlight();
+  });
+  renderer.domElement.addEventListener('mousemove', e=>{
+    mouse.x = (e.clientX/window.innerWidth)*2-1;
+    mouse.y = -(e.clientY/window.innerHeight)*2+1;
+    raycaster.setFromCamera(mouse, camera);
+    const meshes = Object.values(nodes).map(n=>n.mesh);
+    const hits = raycaster.intersectObjects(meshes);
+    if (hits.length){
+      tooltip.style.display='block';
+      tooltip.style.left = e.clientX+14+'px';
+      tooltip.style.top = e.clientY+10+'px';
+      const name = hits[0].object.userData.name;
+      tooltip.textContent = `${name} · ${nodes[name].degree} connection${nodes[name].degree===1?'':'s'}`;
+    } else {
+      tooltip.style.display='none';
+    }
+  });
+
+  function applyHighlight(){
+    Object.entries(nodes).forEach(([name, n])=>{
+      let dim = false, pop = false;
+      if (selected){
+        const isSelf = name === selected;
+        const connected = edges.some(([a,b])=> (a===selected&&b===name)||(b===selected&&a===name));
+        pop = isSelf || connected;
+        dim = !pop;
+      }
+      n.mesh.material.opacity = dim? 0.15 : 1;
+      n.mesh.material.transparent = true;
+      n.mesh.material.emissiveIntensity = pop ? 1.1 : 0.65;
+      n.desiredScale = selected ? (name===selected ? 1.6 : (pop ? 1.3 : 0.8)) : 1;
+      n.label.material.opacity = dim? 0.15 : 1;
+    });
+    lines().forEach(line=>{
+      const touches = selected && (line.userData.a===selected || line.userData.b===selected);
+      line.material.opacity = selected ? (touches? 1 : 0.08) : 0.8;
+    });
+  }
+
+  // ---------- animation loop ----------
+  function animate(){
+    requestAnimationFrame(animate);
+    if (Object.keys(nodes).length) step();
+    target.lerp(targetGoal, 0.08);
+    if (focusing){
+      radius += (radiusGoal - radius) * 0.08;
+      if (Math.abs(radiusGoal - radius) < 0.5) focusing = false;
+    }
+    updateCamera();
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  // ---------- UI wiring ----------
+  function normalize(s){ return s.trim(); }
+
+  function addEdge(a,b){
+    a = normalize(a); b = normalize(b);
+    if (!a || !b || a.toLowerCase()===b.toLowerCase()) return false;
+    const exists = edges.some(e => e[0].toLowerCase()===a.toLowerCase() && e[1].toLowerCase()===b.toLowerCase()
+                                 || e[0].toLowerCase()===b.toLowerCase() && e[1].toLowerCase()===a.toLowerCase());
+    if (exists) return false;
+    edges.push([a,b]);
+    return true;
+  }
+
+  document.getElementById('addBtn').addEventListener('click', ()=>{
+    const a = document.getElementById('nameA').value;
+    const b = document.getElementById('nameB').value;
+    if (addEdge(a,b)){
+      document.getElementById('nameA').value='';
+      document.getElementById('nameB').value='';
+      autoFit = true;
+      saveEdges(); rebuildGraph();
+    }
+  });
+  [document.getElementById('nameA'), document.getElementById('nameB')].forEach(inp=>{
+    inp.addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('addBtn').click(); });
+  });
+
+  document.getElementById('clearBtn').addEventListener('click', ()=>{
+    if (!confirm('Clear all connections for everyone?')) return;
+    edges = []; selected = null;
+    autoFit = true;
+    saveEdges(); rebuildGraph();
+  });
+
+  document.getElementById('fitBtn').addEventListener('click', ()=>{
+    selected = null;
+    targetGoal.set(0,0,0);
+    focusing = false;
+    autoFit = true;
+    applyHighlight();
+  });
+
+  document.getElementById('exportBtn').addEventListener('click', ()=>{
+    const blob = new Blob([JSON.stringify(edges, null, 2)], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'connections.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+
+  document.getElementById('importBtn').addEventListener('click', ()=>{
+    document.getElementById('importFile').click();
+  });
+  document.getElementById('importFile').addEventListener('change', (e)=>{
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        if (!Array.isArray(data)) throw new Error('File must contain a list of connections.');
+        let added = 0;
+        data.forEach(pair=>{
+          if (Array.isArray(pair) && pair.length>=2 && addEdge(pair[0], pair[1])) added++;
+        });
+        if (added){ autoFit = true; saveEdges(); rebuildGraph(); }
+      } catch(err){
+        showError('Could not import file: ' + err.message);
+      }
+      e.target.value = '';
+    };
+    reader.readAsText(file);
+  });
+
+  function updateStats(){
+    const people = new Set();
+    edges.forEach(([a,b])=>{ people.add(a); people.add(b); });
+    document.getElementById('stats').textContent = `${people.size} people · ${edges.length} connections`;
+  }
+
+  function renderList(){
+    const list = document.getElementById('list');
+    list.innerHTML = '';
+    edges.forEach((e, idx)=>{
+      const row = document.createElement('div');
+      row.className = 'conn';
+      const span = document.createElement('span');
+      span.textContent = `${e[0]} — ${e[1]}`;
+      const btn = document.createElement('button');
+      btn.textContent = '×';
+      btn.addEventListener('click', ()=>{
+        edges.splice(idx,1);
+        autoFit = true;
+        saveEdges(); rebuildGraph();
+      });
+      row.appendChild(span); row.appendChild(btn);
+      list.appendChild(row);
+    });
+  }
+
+  function renderPeopleList(){
+    const container = document.getElementById('people');
+    container.innerHTML = '';
+    const names = [];
+    edges.forEach(([a,b])=>{ if(!names.includes(a)) names.push(a); if(!names.includes(b)) names.push(b); });
+    names.sort((a,b)=>a.localeCompare(b));
+    names.forEach(name=>{
+      const row = document.createElement('div');
+      row.className = 'conn';
+      const span = document.createElement('span');
+      span.textContent = name;
+      span.title = 'Click to rename';
+      span.style.cursor = 'pointer';
+      span.addEventListener('click', ()=> startRename(row, name));
+      const btn = document.createElement('button');
+      btn.textContent = '✎';
+      btn.title = 'Rename';
+      btn.addEventListener('click', ()=> startRename(row, name));
+      row.appendChild(span); row.appendChild(btn);
+      container.appendChild(row);
+    });
+  }
+
+  function startRename(row, oldName){
+    row.innerHTML = '';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = oldName;
+    input.style.flex = '1';
+    let done = false;
+    const commit = () => {
+      if (done) return;
+      done = true;
+      const newName = normalize(input.value);
+      if (newName && newName !== oldName) {
+        renameNode(oldName, newName);
+      } else {
+        renderPeopleList();
+      }
+    };
+    const cancel = () => { done = true; renderPeopleList(); };
+    input.addEventListener('keydown', e=>{
+      if (e.key==='Enter'){ e.preventDefault(); commit(); }
+      else if (e.key==='Escape'){ e.preventDefault(); cancel(); }
+    });
+    input.addEventListener('blur', commit);
+    row.appendChild(input);
+    input.focus();
+    input.select();
+  }
+
+  function renameNode(oldName, newName){
+    edges = edges.map(([a,b]) => [ a===oldName?newName:a, b===oldName?newName:b ]);
+    edges = edges.filter(([a,b]) => a.toLowerCase() !== b.toLowerCase());
+    const seen = new Set();
+    const deduped = [];
+    edges.forEach(([a,b])=>{
+      const key = [a.toLowerCase(), b.toLowerCase()].sort().join('|');
+      if (!seen.has(key)){ seen.add(key); deduped.push([a,b]); }
+    });
+    edges = deduped;
+    if (selected === oldName) selected = newName;
+    saveEdges();
+    rebuildGraph();
+  }
+
+  function wireToggle(btnId, panelId){
+    const btn = document.getElementById(btnId);
+    const panel = document.getElementById(panelId);
+    btn.addEventListener('click', ()=>{
+      const open = panel.classList.toggle('open');
+      btn.classList.toggle('open', open);
+    });
+  }
+  wireToggle('peopleToggle', 'people');
+  wireToggle('connToggle', 'list');
+
+  // ---------- initial load + light polling so everyone stays in sync ----------
+  async function initialLoad(){
+    try {
+      edges = await fetchEdges();
+    } catch (err) {
+      showError('Could not load shared data: ' + err.message + '. Showing an empty board — changes may not save until this is fixed.');
+      edges = [];
+    }
+    document.getElementById('loading').style.display = 'none';
+    rebuildGraph();
+  }
+
+  let polling = false;
+  setInterval(async ()=>{
+    if (polling || document.hidden) return;
+    polling = true;
+    try {
+      const fresh = await fetchEdges();
+      if (JSON.stringify(fresh) !== JSON.stringify(edges)){
+        edges = fresh;
+        rebuildGraph();
+      }
+    } catch(e) { /* stay quiet on background poll failures */ }
+    polling = false;
+  }, 20000);
+
+  initialLoad();
+
+  } catch(err) {
+    showError('Init error: ' + err.message);
+    console.error(err);
+  }
+})();
+</script>
+</body>
+</html>

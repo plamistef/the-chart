@@ -1,0 +1,9 @@
+{
+  "name": "the-chart",
+  "version": "1.0.0",
+  "private": true,
+  "description": "3D connection web with a shared, persistent backend (Vercel + Upstash Redis).",
+  "engines": {
+    "node": ">=18"
+  }
+}
